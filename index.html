@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>文字 → Base64(32文字) パスワード生成</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif; padding: 24px; background:#f7f8fb; color:#111; }
+  .card { max-width:720px; margin:0 auto; background:#fff; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(20,20,40,0.06); }
+  h1 { margin:0 0 12px; font-size:20px; }
+  label { display:block; margin-top:12px; font-weight:600; }
+  textarea, input[type="text"] { width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid #e3e6ee; font-size:14px; }
+  .row { display:flex; gap:8px; margin-top:12px; }
+  button { padding:10px 14px; border-radius:8px; border:0; background:#2b6edf; color:#fff; font-weight:600; cursor:pointer; }
+  button.secondary { background:#6b7280; }
+  pre { background:#f3f4f6; padding:12px; border-radius:8px; overflow:auto; }
+  .small { font-size:13px; color:#555; margin-top:8px; }
+  .note { font-size:13px; color:#444; margin-top:10px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>文字 → Base64(32文字) パスワード生成</h1>
+
+    <label for="inputStr">変換したい文字列</label>
+    <textarea id="inputStr" rows="4" placeholder="ここに任意の文字を入力"></textarea>
+
+    <div class="row">
+      <button id="generateBtn">生成</button>
+      <button id="copyBtn" class="secondary">コピー</button>
+      <button id="clearBtn" class="secondary">クリア</button>
+    </div>
+
+    <label for="result">生成されたパスワード（長さ 32 / URL-safe Base64）</label>
+    <input type="text" id="result" readonly />
+
+    <div class="small">仕様: 出力は常に先頭 <code>Uni928_</code> で始まり（7文字）、残り 25 文字は入力の SHA-256 ハッシュを URL-safe base64 化した先頭部分を使用します。同じ入力は常に同じ出力になります。<br>日頃使う 4 桁のパスワードや、セキュリティ面は微妙ですがメールアドレスや id 欄をそのままパスワードに流用する場合にご利用下さい。</div>
+
+    <div class="note">
+      <strong>注意:</strong> このツールは利便性のための変換ツールです。セキュリティ要件（秘密鍵の保護や不可逆性など）によっては別途設計が必要です。
+    </div>
+
+    <hr style="margin:18px 0" />
+
+    <div>
+      <label>内部ダンプ（確認用）</label>
+      <pre id="debug"></pre>
+    </div>
+  </div>
+
+<script>
+/**
+ * SHA-256 を計算して base64 (URL-safe) に変換する
+ * - input: string
+ * - return: Promise<string> (base64url, padding 削除)
+ */
+async function sha256Base64Url(input) {
+  const enc = new TextEncoder();
+  const data = enc.encode(input);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  // btoa に渡すためのバイナリ文字列作成
+  let binary = '';
+  for (let i = 0; i < hashArray.length; i++) {
+    binary += String.fromCharCode(hashArray[i]);
+  }
+  let b64 = btoa(binary); // standard base64
+  // URL-safe に変換: + -> -, / -> _, remove padding =
+  const b64url = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64url;
+}
+
+const PREFIX = 'Uni928_'; // 7 characters
+const TOTAL_LEN = 32;
+const REMAIN = TOTAL_LEN - PREFIX.length; // 25
+
+const inputEl = document.getElementById('inputStr');
+const generateBtn = document.getElementById('generateBtn');
+const copyBtn = document.getElementById('copyBtn');
+const clearBtn = document.getElementById('clearBtn');
+const resultEl = document.getElementById('result');
+const debugEl = document.getElementById('debug');
+
+async function generate() {
+  const input = inputEl.value || '';
+  // deterministic: same input => same hash => same base64 => same output
+  const b64url = await sha256Base64Url(input);
+  // b64url は SHA-256 の base64url 表現（長さ 43）
+  const tail = b64url.slice(0, REMAIN);
+  const out = (PREFIX + tail).slice(0, TOTAL_LEN); // 念のため長さ揃え
+  resultEl.value = out;
+
+  debugEl.textContent = [
+    '入力 (UTF-8): ' + (input === '' ? '(空文字)' : input),
+    'SHA-256 base64url: ' + b64url,
+    '切り取り長さ: ' + REMAIN,
+    '出力: ' + out,
+    '出力長: ' + out.length
+  ].join('\n');
+}
+
+generateBtn.addEventListener('click', () => {
+  generate().catch(err => {
+    console.error(err);
+    alert('生成中にエラーが発生しました: ' + err);
+  });
+});
+
+copyBtn.addEventListener('click', async () => {
+  const txt = resultEl.value;
+  if (!txt) {
+    alert('コピーする文字列がありません。先に「生成」を押して下さい。');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(txt);
+    copyBtn.textContent = 'コピーしました';
+    setTimeout(()=> copyBtn.textContent = 'コピー', 1500);
+  } catch (e) {
+    alert('クリップボードに書き込めませんでした: ' + e);
+  }
+});
+
+clearBtn.addEventListener('click', () => {
+  inputEl.value = '';
+  resultEl.value = '';
+  debugEl.textContent = '';
+});
+</script>
+</body>
+</html>
